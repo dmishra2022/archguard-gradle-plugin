@@ -1,0 +1,77 @@
+name: CI
+
+# Runs on every PR and every push to main. Builds + tests both subprojects
+# and runs the sample app's full `check` task.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & test (JDK ${{ matrix.jdk }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The ArchGuard 0.1.0 SDK's class resolver fails on JDK 27 (see
+        # docs/gradle-plugin.md "Known limitations"). Pin to 17–25 until the
+        # SDK ships a fix.
+        jdk: ['17', '21', '25']
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      # ArchGuard SDK 0.1.0 is not on Maven Central yet. CI builds the SDK
+      # from source and installs it to mavenLocal(), then uses it from there.
+      # Harmless on each PR because actions/cache will reuse the ~/.m2 cache.
+      - name: Check out the ArchGuard SDK
+        uses: actions/checkout@v4
+        with:
+          repository: dmishra2022/archguard
+          path: .archguard-sdk
+
+      - name: Set up JDK ${{ matrix.jdk }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.jdk }}
+
+      - name: Cache ~/.m2 (ArchGuard SDK artifacts)
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/io/archguard
+          # Key on SDK commit so a bumped SDK invalidates the cache cleanly.
+          key: archguard-sdk-${{ hashFiles('.archguard-sdk/pom.xml') }}
+
+      - name: Install ArchGuard SDK to mavenLocal (if not cached)
+        run: |
+          if [ ! -d "$HOME/.m2/repository/io/archguard/archguard-core" ]; then
+            cd .archguard-sdk
+            mvn -q -DskipTests install
+          else
+            echo "ArchGuard SDK already in local cache; skipping install."
+          fi
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build + test (plugin + archunit-rules)
+        run: ./gradlew build --no-daemon --console=plain
+
+      - name: Sample-app end-to-end check
+        run: cd sample-app && ../gradlew check --no-daemon --console=plain
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-jdk-${{ matrix.jdk }}
+          path: |
+            **/build/reports/**
+            **/build/test-results/**

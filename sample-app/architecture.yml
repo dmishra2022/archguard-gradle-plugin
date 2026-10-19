@@ -1,0 +1,41 @@
+# Policy for the three-module sample. Mirrors what a real DDD/Hexagonal app
+# looks like so the test is a realistic smoke test for the plugin.
+schemaVersion: 1
+
+# Everything we analyse lives under com.example.
+roots: ["com.example.."]
+
+# Activate ArchGuard's hexagonal + DDD built-in rules.
+# HEX-001..004 catch illegal cross-layer flow.
+# DDD-001 catches cross-context access to internal types.
+# DDD-002 catches context dependency cycles.
+profiles: [hexagonal, ddd]
+
+# Map every package to its architectural role so the SDK knows what each class
+# is supposed to be.
+roles:
+  DOMAIN:           ["com.example.domain.."]
+  APPLICATION:      ["com.example.application.."]
+  OUTBOUND_PORT:    ["com.example.port.out.."]
+  INBOUND_PORT:     ["com.example.port.in.."]
+  INBOUND_ADAPTER:  ["com.example.adapter.rest.."]
+
+# One context in this sample. Real systems typically have several.
+contexts:
+  - id: orders
+    packages: ["com.example.."]
+    exposedPackages:
+      - "com.example.port.in.."
+      - "com.example.port.out.."
+
+# Any class under com.example.. that is not covered by a role above is an
+# error — forces developers to classify new code intentionally.
+requireClassification: true
+
+# Fail the build on ERROR-severity findings. INFO/WARN still show up in the
+# report but do not break CI.
+failOn: ERROR
+
+# `newOnly: true` combined with a baseline enables the "pay down debt over
+# time" workflow. Set to false in a fresh project.
+newOnly: false
